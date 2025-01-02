@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+
+import pyfiglet
+from colorama import Fore, Style
+import requests
+import argparse
+import json
+import os
+import time
+import sys
+import threading
+
+# Replace these placeholders with actual API keys and endpoints
+API_KEYS = {
+    "virustotal": "<<-------API-KEY--------->>",
+    "abuseipdb":"<<-------API-KEY--------->>",
+}
+
+BASE_URLS = {
+    "virustotal": "https://www.virustotal.com/api/v3/",
+    "abuseipdb": "https://api.abuseipdb.com/api/v2/",
+}
+
+stop_animation = False
+
+def display_banner():
+    """Displays the initial banner for the tool."""
+    ascii_banner = pyfiglet.figlet_format("DARK SCAN")
+    print(Fore.YELLOW + ascii_banner + Style.RESET_ALL)
+    print(Fore.LIGHTYELLOW_EX + "CYBER THREAT ANALYSIS TOOL".center(80))
+    print("https://github.com/vishal-rathod-1/Dark-scan".center(80))
+    print("-" * 80)
+    print("Version: 1.0.0".center(80) + Style.RESET_ALL)
+    print("\n")
+
+def loading_animation(message="Analyzing"):
+    """Displays a loading animation in the CLI."""
+    global stop_animation
+    chars = "|/-\\"
+    idx = 0
+    while not stop_animation:
+        sys.stdout.write(f"\r{message}... {chars[idx % len(chars)]}")
+        sys.stdout.flush()
+        idx += 1
+        time.sleep(0.2)
+    sys.stdout.write("\r" + " " * len(message) + "\r")  # Clear line
+
+def query_virustotal(ip):
+    """Queries VirusTotal for IP data."""
+    url = f"{BASE_URLS['virustotal']}ip_addresses/{ip}"
+    headers = {"x-apikey": API_KEYS['virustotal']}
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return response.json()
+    return {"error": response.status_code, "message": response.text}
+
+def query_abuseipdb(ip):
+    """Queries AbuseIPDB for IP data."""
+    url = f"{BASE_URLS['abuseipdb']}check"
+    headers = {
+        "Key": API_KEYS['abuseipdb'],
+        "Accept": "application/json",
+    }
+    params = {"ipAddress": ip, "maxAgeInDays": 90}
+    response = requests.get(url, headers=headers, params=params)
+    if response.status_code == 200:
+        return response.json()
+    return {"error": response.status_code, "message": response.text}
+
+def analyze_ip(ip):
+    """Analyzes the given IP address using VirusTotal and AbuseIPDB."""
+    global stop_animation
+    stop_animation = False
+    animation_thread = threading.Thread(target=loading_animation, args=(f"Analyzing IP: {ip}",))
+    animation_thread.start()
+
+    vt_data = query_virustotal(ip)
+    abuseip_data = query_abuseipdb(ip)
+
+    stop_animation = True
+    animation_thread.join()
+
+    result = {
+        "ip": ip,
+        "virustotal": vt_data if "error" not in vt_data else {"error": vt_data["message"]},
+        "abuseipdb": abuseip_data if "error" not in abuseip_data else {"error": abuseip_data["message"]},
+    }
+    print(json.dumps(result, indent=4))
+    return result
+
+def save_results_to_file(results, ip=None):
+    """Saves the results to a JSON file named after the IP address or defaults to ip_address.json."""
+    output_file = f"{ip.replace('.', '_')}.json" if ip else "ip_address.json"
+    with open(output_file, "w") as file:
+        json.dump(results, file, indent=4)
+    print(f"\nResults saved to {output_file}")
+
+def main():
+    """Main function to handle user input and process IPs."""
+    display_banner()  # Show banner at the start
+
+    parser = argparse.ArgumentParser(description="Cyber Threat Intelligence CLI Tool")
+    parser.add_argument("--ip", type=str, help="The IP address to analyze")
+    parser.add_argument("--file", type=str, help="Path to a file containing a list of IP addresses")
+    args = parser.parse_args()
+
+    results = []
+
+    if args.ip:
+        print(f"\nAnalyzing IP: {args.ip}")
+        result = analyze_ip(args.ip)
+        results.append(result)
+        save_results_to_file(results, ip=args.ip)
+
+    if args.file:
+        if not os.path.exists(args.file):
+            print(f"File not found: {args.file}")
+            return
+
+        with open(args.file, "r") as file:
+            ips = file.readlines()
+        for ip in ips:
+            ip = ip.strip()
+            if ip:
+                print(f"\nProcessing IP: {ip}")
+                result = analyze_ip(ip)
+                results.append(result)
+                save_results_to_file([result], ip=ip)  # Save each result separately
+
+    if args.ip is None and args.file is None:
+        print("No IP or file specified. Use --ip or --file to analyze.")
+
+if __name__ == "__main__":
+    main()
